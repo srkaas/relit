@@ -1,4 +1,10 @@
 require 'wordnet'
+require 'pickup'
+
+IMPROVE_WORD_RETRIES = 10
+STANDARD_IMPROVEMENTS_HASH = {'child' => 10, 'parent' => 10, 'sibling' => 10, 'synonym' => 10, 'define' => 3, 'nothing' => 40}
+CONTINUE_IMPROVING_PROBABILITY = 0.8
+MAX_CONTINUE_IMPROVING = 2
 
 l = WordNet::Lexicon.new
 
@@ -50,7 +56,7 @@ def random_child(synset)
   end
 end
 
-# Return a random synonym set that is a hyponym of a hypernym of the current synonym set, i.e. something of the same kind.
+# Return a random synonym set that is a hyponym of a hypernym of the current synonym set, i.e., something of the same kind.
 def random_sibling(synset)
   if synset.nil?
     return nil
@@ -70,19 +76,51 @@ def random_sibling(synset)
 end
 
 # Convert a word into a different word.
-def improve_word(word, lexicon)
-  improved = synset_to_string(random_sibling(string_to_synset(word, lexicon)))
-  # If the process failed to find a modified word, just use the original word.
+def improve_word(word, lexicon, times_tried=0, improvement='child')
+  if improvement == 'sibling'
+    improved = synset_to_string(random_sibling(string_to_synset(word, lexicon)))
+  elsif improvement == 'child'
+    improved = synset_to_string(random_child(string_to_synset(word, lexicon)))
+  elsif improvement == 'parent'
+    improved = synset_to_string(random_parent(string_to_synset(word, lexicon)))
+  elsif improvement == 'define'
+    corresponding_synset = string_to_synset(word, lexicon)
+    if corresponding_synset.nil?
+      improved = '...'
+    else
+      improved = corresponding_synset.definition
+    end
+  elsif improvement == 'nothing'
+    improved = word
+  elsif improvement == 'synonym'
+    improved = synset_to_string(string_to_synset(word, lexicon))
+  end
+  # If the process failed to find a modified word, retry a number of times and then just use the original word.
   if improved == '...'
-    return word
+    if times_tried < IMPROVE_WORD_RETRIES
+      return improve_word(word, lexicon, times_tried + 1)
+    else
+      return word
+    end
   else
     return improved
   end
 end
 
+def probabilistic_improve_word(word, lexicon, improvements_hash=STANDARD_IMPROVEMENTS_HASH)
+  pickup = Pickup.new(improvements_hash)
+  picked_improvement = pickup.pick
+  return improve_word(word, lexicon, 0, picked_improvement)
+end
+
+def probabilistic_improve_all_words(text, lexicon, improvements_hash=STANDARD_IMPROVEMENTS_HASH)
+  return text.gsub(/\w+/) { |word| probabilistic_improve_word(word, lexicon, improvements_hash) }
+end
+
 # Convert a text into a different text by converting each word of the text into a different word.
 def improve_text(text, lexicon)
-  return text.gsub(/\w+/) { |word| improve_word(word, lexicon) }
+  text = probabilistic_improve_all_words(text, lexicon)
+  return text
 end
 
 # Test text conversion with a particular text.
@@ -99,3 +137,4 @@ def test_me(lexicon)
 end
 
 test_me(l)
+
